@@ -245,26 +245,28 @@ static uint32_t embcrc(const uint8_t *data, size_t len, uint32_t crc)
     return crc;
 }
 
-static int emboot_calc_hash(int remain, int offset, emboot_get_t embget)
+static int emboot_calc_hash(int remain, int getpos, emboot_get_t embget)
 {
     int blkmax = sizeof(emboot_copy_buffer);
     int blklen;
     int pkglen = remain;
+    int pkgpos = 0;
     int crcval = EMBOOT_CRC_INIT;
 
     emboot_printf_i("00%%");
     while (remain > 0)
     {
-        int percent = offset * 100 / pkglen;
+        int percent = pkgpos * 100 / pkglen;
         if (percent % 5 == 0 && percent < 100)
         {
             emboot_printf_i("\b\b\b%02d%%", percent);
         }
 
         blklen = remain > blkmax ? blkmax : remain;
-        embget(offset, emboot_copy_buffer, blklen);
+        embget(getpos, emboot_copy_buffer, blklen);
         crcval = embcrc(emboot_copy_buffer, blklen, crcval);
-        offset += blklen;
+        pkgpos += blklen;
+        getpos += blklen;
         remain -= blklen;
     }
     emboot_printf_i("\b\b\b100%% ");
@@ -272,25 +274,28 @@ static int emboot_calc_hash(int remain, int offset, emboot_get_t embget)
     return crcval;
 }
 
-static int emboot_copy_data(int remain, int offset, emboot_get_t embget, emboot_set_t embset)
+static int emboot_copy_data(int remain, int getpos, int setpos, emboot_get_t embget, emboot_set_t embset)
 {
     int blkmax = sizeof(emboot_copy_buffer);
     int blklen;
     int pkglen = remain;
+    int pkgpos = 0;
 
     emboot_printf_i("00%%");
     while (remain > 0)
     {
-        int percent = offset * 100 / pkglen;
+        int percent = pkgpos * 100 / pkglen;
         if (percent % 5 == 0 && percent < 100)
         {
             emboot_printf_i("\b\b\b%02d%%", percent);
         }
 
         blklen = remain > blkmax ? blkmax : remain;
-        embget(offset, emboot_copy_buffer, blklen);
-        embset(offset, emboot_copy_buffer, blklen);
-        offset += blklen;
+        embget(getpos, emboot_copy_buffer, blklen);
+        embset(setpos, emboot_copy_buffer, blklen);
+        pkgpos += blklen;
+        getpos += blklen;
+        setpos += blklen;
         remain -= blklen;
     }
     emboot_printf_i("\b\b\b100%% ");
@@ -667,16 +672,16 @@ retry_decode:
     emboot_decode_erase();
 
     hpatch_handle_t hpatch = {0};
-    hpatch.patch_file_offset  = emboot_head->header_size + emboot_head->patchx_data[idx].patchi_addr;
-    hpatch.patch_file_length     = emboot_head->patchx_data[idx].patchi_size;
-    hpatch.newer_file_length     = emboot_head->patchx_data[idx].newapp_size;
+    hpatch.patch_file_offset = emboot_head->header_size + emboot_head->patchx_data[idx].patchi_addr;
+    hpatch.patch_file_length = emboot_head->patchx_data[idx].patchi_size;
+    hpatch.newer_file_length = emboot_head->patchx_data[idx].newapp_size;
 
     int type = emboot_head->patchx_data[idx].patchi_type;
 
     if (type <  0)  // full update with image file
     {
         emboot_printf_i("unpack [decode/newapp] <- [dnload/FullUpdateIMAGE] [copying...] ");
-        emboot_copy_data(emboot_head->remain_size, emboot_head->header_size, emboot_backup_read, emboot_decode_write);
+        emboot_copy_data(emboot_head->remain_size, emboot_head->header_size, 0, emboot_backup_read, emboot_decode_write);
     }
     if (type == 0)  // full update with patch file
     {
@@ -737,7 +742,7 @@ static int emboot_backup(emboot_ctrl_t *emboot_ctrl, emboot_head_t *emboot_head)
     emboot_backup_erase();
 
     emboot_printf_i("backup [dnload/backup] <- [curent/runapp] ");
-    emboot_copy_data(embget_runapp_size(), 0, emboot_runapp_read, emboot_backup_write);
+    emboot_copy_data(embget_runapp_size(), 0, 0, emboot_runapp_read, emboot_backup_write);
     emboot_printf_i("\n");
 
     emboot_printf_i("hasher [curent/runapp] ");
@@ -767,7 +772,7 @@ retry_docopy:
     emboot_runapp_erase();
 
     emboot_printf_i("docopy [curent/runapp] <- [decode/newapp] ");
-    emboot_copy_data(emboot_head->patchx_data[idx].newapp_size, 0, emboot_decode_read, emboot_runapp_write);
+    emboot_copy_data(emboot_head->patchx_data[idx].newapp_size, 0, 0, emboot_decode_read, emboot_runapp_write);
     emboot_printf_i("\n");
 
     emboot_printf_i("verify [curent/runapp] ");
@@ -847,7 +852,7 @@ retry_revert:
     emboot_runapp_erase();
 
     emboot_printf_i("revert [curent/runapp] <- [backup/oldapp] ");
-    emboot_copy_data(emboot_ctrl->backup_size, 0, emboot_backup_read, emboot_runapp_write);
+    emboot_copy_data(emboot_ctrl->backup_size, 0, 0, emboot_backup_read, emboot_runapp_write);
     emboot_printf_i("\n");
 
     emboot_printf_i("verify [curent/runapp] ");
@@ -924,7 +929,7 @@ retry_recopy:
     emboot_runapp_erase();
 
     emboot_printf_i("recopy [curent/runapp] <- [decode/newapp] ");
-    emboot_copy_data(emboot_ctrl->decode_size, 0, emboot_decode_read, emboot_runapp_write);
+    emboot_copy_data(emboot_ctrl->decode_size, 0, 0, emboot_decode_read, emboot_runapp_write);
     emboot_printf_i("\n");
 
     emboot_printf_i("verify [curent/runapp] ");
@@ -977,7 +982,7 @@ retry_recopy:
     emboot_runapp_erase();
 
     emboot_printf_i("recopy [curent/runapp] <- [decode/newapp] ");
-    emboot_copy_data(embget_runapp_size(), 0, emboot_decode_read, emboot_runapp_write);
+    emboot_copy_data(embget_runapp_size(), 0, 0, emboot_decode_read, emboot_runapp_write);
     emboot_printf_i("\n");
 
     emboot_printf_i("verify [curent/runapp] ");
